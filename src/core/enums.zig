@@ -10,7 +10,7 @@ pub const TokenKind = enum {
     /// An identifier starting with a letter or underscore.
     identifier,
     /// A leading indentation level (tab at line start).
-    indent, // we treat a 4-space indent as a single token
+    indent,
 
     // single-char tokens
     /// The `+` operator.
