@@ -21,13 +21,14 @@ pub const Token = struct {
 
     /// Token categories.
     pub const Kind = enum {
+        invalid,
         identifier,
         string_literal,
         number_literal,
-        float,
         whitespace,
         eof,
         tab,
+        dot,
         newline,
         l_paren,
         r_paren,
@@ -98,6 +99,9 @@ pub const Tokenizer = struct {
         minus,
         plus,
         invalid,
+        int,
+        int_dot,
+        float,
     };
 
     /// Scan and return the next token in the input.
@@ -142,6 +146,11 @@ pub const Tokenizer = struct {
                     result.kind = .identifier;
                     continue :state .identifier;
                 },
+                '0'...'9' => {
+                    result.kind = .number_literal;
+                    self.index += 1;
+                    continue :state .int;
+                },
                 '(' => {
                     self.index += 1;
                     result.kind = .l_paren;
@@ -170,6 +179,10 @@ pub const Tokenizer = struct {
                     self.index += 1;
                     result.kind = .comma;
                 },
+                '.' => {
+                    self.index += 1;
+                    result.kind = .dot;
+                },
                 '\t' => {
                     self.index += 1;
                     result.kind = .tab;
@@ -179,6 +192,21 @@ pub const Tokenizer = struct {
                     result.kind = .newline;
                 },
                 else => continue :state .invalid,
+            },
+
+            .invalid => {
+                self.index += 1;
+                switch (self.buffer[self.index]) {
+                    0 => if (self.index == self.buffer.len) {
+                        result.kind = .invalid;
+                    } else {
+                        continue :state .invalid;
+                    },
+                    // Stolen from zig, we won't propagate the invalid state
+                    // past a newline.
+                    '\n' => result.kind = .invalid,
+                    else => continue :state .invalid,
+                }
             },
 
             .whitespace => switch (self.buffer[self.index]) {
@@ -250,6 +278,17 @@ pub const Tokenizer = struct {
                 }
             },
 
+            .pipe => {
+                self.index += 1;
+                switch (self.buffer[self.index]) {
+                    '|' => {
+                        self.index += 1;
+                        result.kind = .pipe_pipe;
+                    },
+                    else => result.kind = .pipe,
+                }
+            },
+
             .bang => {
                 self.index += 1;
                 switch (self.buffer[self.index]) {
@@ -273,7 +312,34 @@ pub const Tokenizer = struct {
                 },
             },
 
-            else => continue :state .invalid,
+            .int => switch (self.buffer[self.index]) {
+                '.' => continue :state .int_dot,
+                '0'...'9' => {
+                    self.index += 1;
+                    continue :state .int;
+                },
+                else => {},
+            },
+            .int_dot => {
+                self.index += 1;
+                switch (self.buffer[self.index]) {
+                    '0'...'9' => {
+                        self.index += 1;
+                        continue :state .float;
+                    },
+                    else => {
+                        // Rollback to before the dot
+                        self.index -= 1;
+                    },
+                }
+            },
+            .float => switch (self.buffer[self.index]) {
+                '0'...'9' => {
+                    self.index += 1;
+                    continue :state .float;
+                },
+                else => {},
+            },
         }
 
         result.loc.end = self.index;
@@ -281,20 +347,37 @@ pub const Tokenizer = struct {
     }
 };
 
-test "Valid tokenization" {
+test "symbols" {
     try testTokenize("", &.{});
     try testTokenize("   \t", &.{ .whitespace, .tab });
     try testTokenize("\t\t", &.{ .tab, .tab });
     try testTokenize("\n\n", &.{ .newline, .newline });
-    try testTokenize("pub fn foo", &.{ .keyword_pub, .whitespace, .keyword_fn, .whitespace, .identifier });
     try testTokenize("()", &.{ .l_paren, .r_paren });
     try testTokenize("[]", &.{ .l_square, .r_square });
     try testTokenize("{}", &.{ .l_brace, .r_brace });
-    try testTokenize("\"abc\"", &.{.string_literal});
     try testTokenize("- -- -=", &.{ .minus, .whitespace, .minus_minus, .whitespace, .minus_equal });
     try testTokenize("+ ++ +=", &.{ .plus, .whitespace, .plus_plus, .whitespace, .plus_equal });
     try testTokenize("= == =>", &.{ .equal, .whitespace, .equal_equal, .whitespace, .equal_angle_bracket_right });
     try testTokenize("! !=", &.{ .bang, .whitespace, .bang_equal });
+    try testTokenize("| ||", &.{ .pipe, .whitespace, .pipe_pipe });
+    try testTokenize(".", &.{.dot});
+}
+
+test "identifiers" {
+    try testTokenize("pub fn foo", &.{ .keyword_pub, .whitespace, .keyword_fn, .whitespace, .identifier });
+}
+
+test "string literals" {
+    try testTokenize("\"abc\"", &.{.string_literal});
+    try testTokenize("\"\"", &.{.string_literal});
+}
+
+test "number literals" {
+    try testTokenize("0", &.{.number_literal});
+    try testTokenize("1", &.{.number_literal});
+    try testTokenize("0.0", &.{.number_literal});
+    try testTokenize("1.0", &.{.number_literal});
+    try testTokenize("1.", &.{ .number_literal, .dot });
 }
 
 /// Utility function to test the tokenizer.
