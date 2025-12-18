@@ -1,7 +1,6 @@
-pub const enums = @import("enums.zig");
-pub const tokenize = @import("tokenize.zig");
+const std = @import("std");
 
-test {
-    _ = enums;
-    _ = tokenize;
-}
+const tokenizer = @import("zig/tokenizer.zig");
+
+pub const Token = tokenizer.Token;
+pub const Tokenizer = tokenizer.Tokenizer;
