@@ -1,20 +1,25 @@
+//! Tokenizer for the core language grammar.
+
 const std = @import("std");
 
 pub const Token = struct {
     kind: Kind,
     loc: Loc,
 
+    /// Source byte offsets for a token.
     pub const Loc = struct {
         start: usize,
         end: usize,
     };
 
+    /// Keywords recognized by the tokenizer.
     pub const keywords = std.StaticStringMap(Kind).initComptime(.{
         .{ "and", .keyword_and },
         .{ "fn", .keyword_fn },
         .{ "pub", .keyword_pub },
     });
 
+    /// Token categories.
     pub const Kind = enum {
         identifier,
         string_literal,
@@ -32,10 +37,12 @@ pub const Token = struct {
         r_square,
         comma,
         bang,
+        bang_equal,
         pipe,
         pipe_pipe,
         equal,
         equal_equal,
+        equal_angle_bracket_right,
         plus,
         plus_plus,
         plus_equal,
@@ -57,6 +64,7 @@ pub const Token = struct {
         }
     };
 
+    /// Human-readable symbol for a kind, useful in error messages.
     pub fn symbol(kind: Kind) []const u8 {
         return kind.lexeme() orelse switch (kind) {
             .identifier => "identifier",
@@ -66,10 +74,12 @@ pub const Token = struct {
     }
 };
 
+/// Stateful tokenizer over a zero-terminated buffer.
 pub const Tokenizer = struct {
     buffer: [:0]const u8,
     index: usize,
 
+    /// Create a tokenizer for the given zero-terminated buffer.
     pub fn init(buffer: [:0]const u8) Tokenizer {
         return Tokenizer{
             .buffer = buffer,
@@ -85,9 +95,12 @@ pub const Tokenizer = struct {
         equal,
         bang,
         pipe,
+        minus,
+        plus,
         invalid,
     };
 
+    /// Scan and return the next token in the input.
     pub fn next(self: *Tokenizer) Token {
         var result: Token = .{
             .kind = undefined,
@@ -111,6 +124,11 @@ pub const Tokenizer = struct {
                         continue :state .invalid;
                     }
                 },
+                '|' => continue :state .pipe,
+                '=' => continue :state .equal,
+                '!' => continue :state .bang,
+                '+' => continue :state .plus,
+                '-' => continue :state .minus,
                 '"' => {
                     self.index += 1;
                     result.kind = .string_literal;
@@ -187,6 +205,62 @@ pub const Tokenizer = struct {
                 }
             },
 
+            .equal => {
+                self.index += 1;
+                switch (self.buffer[self.index]) {
+                    '=' => {
+                        self.index += 1;
+                        result.kind = .equal_equal;
+                    },
+                    '>' => {
+                        self.index += 1;
+                        result.kind = .equal_angle_bracket_right;
+                    },
+                    else => result.kind = .equal,
+                }
+            },
+
+            .minus => {
+                self.index += 1;
+                switch (self.buffer[self.index]) {
+                    '-' => {
+                        self.index += 1;
+                        result.kind = .minus_minus;
+                    },
+                    '=' => {
+                        self.index += 1;
+                        result.kind = .minus_equal;
+                    },
+                    else => result.kind = .minus,
+                }
+            },
+
+            .plus => {
+                self.index += 1;
+                switch (self.buffer[self.index]) {
+                    '+' => {
+                        self.index += 1;
+                        result.kind = .plus_plus;
+                    },
+                    '=' => {
+                        self.index += 1;
+                        result.kind = .plus_equal;
+                    },
+                    else => result.kind = .plus,
+                }
+            },
+
+            .bang => {
+                self.index += 1;
+                switch (self.buffer[self.index]) {
+                    '=' => {
+                        self.index += 1;
+                        result.kind = .bang_equal;
+                    },
+                    else => result.kind = .bang,
+                }
+            },
+
             .string_literal => switch (self.buffer[self.index]) {
                 '"' => {
                     self.index += 1;
@@ -217,6 +291,10 @@ test "Valid tokenization" {
     try testTokenize("[]", &.{ .l_square, .r_square });
     try testTokenize("{}", &.{ .l_brace, .r_brace });
     try testTokenize("\"abc\"", &.{.string_literal});
+    try testTokenize("- -- -=", &.{ .minus, .whitespace, .minus_minus, .whitespace, .minus_equal });
+    try testTokenize("+ ++ +=", &.{ .plus, .whitespace, .plus_plus, .whitespace, .plus_equal });
+    try testTokenize("= == =>", &.{ .equal, .whitespace, .equal_equal, .whitespace, .equal_angle_bracket_right });
+    try testTokenize("! !=", &.{ .bang, .whitespace, .bang_equal });
 }
 
 /// Utility function to test the tokenizer.
